@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Farcaster Scheduler (Demo)</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; line-height: 1.4; }
+      h1 { margin: 0 0 12px; }
+      section { border: 1px solid #e9ecef33; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+      label { display: block; margin: 8px 0 4px; }
+      input[type="text"], textarea, input[type="datetime-local"] { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #dee2e6; background: inherit; color: inherit; }
+      button { padding: 8px 12px; border-radius: 6px; border: 1px solid #adb5bd; background: #0a58ca; color: #fff; cursor: pointer; }
+      button.secondary { background: transparent; color: inherit; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .muted { color: #6c757d; font-size: 0.9rem; }
+      .ok { color: #198754; }
+      .err { color: #dc3545; }
+      .preview { margin-top: 8px; }
+      img.preview-img { max-width: 240px; border-radius: 6px; border: 1px solid #e9ecef55; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 8px; border-bottom: 1px solid #e9ecef33; text-align: left; }
+      code { background: #e9ecef22; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Farcaster Scheduler (Demo)</h1>
+
+    <section>
+      <h3>1) Sign in with Farcaster</h3>
+      <div id="siwn-container">
+        <!-- SIWN button mounts here -->
+      </div>
+      <div id="session" class="muted"></div>
+    </section>
+
+    <section>
+      <h3>2) Compose + Schedule</h3>
+      <div class="row">
+        <label style="margin-right:8px;">Mode:</label>
+        <label><input type="radio" name="mode" id="modeCast" checked /> Cast</label>
+        <label><input type="radio" name="mode" id="modeZora" /> Zora Coin</label>
+        <input id="overrideAddress" type="text" placeholder="Override wallet (0x.. or zora handle)" style="flex:1; min-width:260px; max-width:420px;" />
+        <button id="viewZoraProfileBtn" class="secondary">View Zora Profile</button>
+      </div>
+      <div class="row">
+        <div>
+          <label>Text</label>
+          <textarea id="text" rows="4" placeholder="What’s happening?"></textarea>
+        </div>
+      </div>
+      <div class="row" id="zoraFields" style="display:none;">
+        <div>
+          <label>Title</label>
+          <input id="zoraTitle" type="text" placeholder="Coin title" />
+        </div>
+        <div>
+          <label>Symbol (optional)</label>
+          <input id="zoraSymbol" type="text" placeholder="e.g., ZCOIN" />
+        </div>
+        <div style="flex:1;">
+          <label>Caption</label>
+          <textarea id="zoraCaption" rows="3" placeholder="Describe your coin"></textarea>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Media (image/video)</label>
+          <input id="file" type="file" accept="image/*,video/mp4" />
+          <div id="uploadStatus" class="muted"></div>
+          <div id="preview" class="preview"></div>
+        </div>
+        <div>
+          <label>Schedule (local time)</label>
+          <input id="when" type="datetime-local" />
+        </div>
+      </div>
+      <div id="zoraProfileBox" class="muted" style="margin-top:8px;"></div>
+      <div class="row" style="margin-top:8px;">
+        <button id="scheduleBtn">Schedule</button>
+        <span id="scheduleMsg" class="muted"></span>
+        <button id="createNowBtn" class="secondary" style="display:none; margin-left:8px;">Create Now</button>
+        <span id="walletInfo" class="muted" style="margin-left:8px;"></span>
+      </div>
+    </section>
+
+    <section>
+      <div class="row" style="justify-content: space-between;">
+        <h3>3) Scheduled Queue</h3>
+        <div class="row">
+          <button id="runNowBtn" class="secondary">Publish Due Now</button>
+          <button id="refreshBtn" class="secondary">Refresh</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>When (UTC)</th>
+            <th>Text</th>
+            <th>Media</th>
+            <th>Hash</th>
+            <th>Error</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="queueBody"></tbody>
+      </table>
+    </section>
+
+    
+
+    <section>
+      <div class="row" style="justify-content: space-between;">
+        <h3>Zora Coin Queue</h3>
+        <div class="row">
+          <button id="zoraRunNowBtn" class="secondary">Create Due Now</button>
+          <button id="zoraRefreshBtn" class="secondary">Refresh</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>When (UTC)</th>
+            <th>Title</th>
+            <th>Symbol</th>
+            <th>Media</th>
+            <th>Tx</th>
+            <th>Error</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="zoraQueueBody"></tbody>
+      </table>
+    </section>
+
+    <!-- overrideAddress field moved inline with the View button -->
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let sessionToken = localStorage.getItem('sessionToken') || '';
+      let neynarClientId = '';
+      let pinataGateway = '';
+      let uploadedMediaUrl = '';
+      let uploadedMediaCid = '';
+      let uploadedMediaKind = '';
+      // unified uploader state used for both modes
+
+      async function fetchJSON(url, opts={}) {
+        const headers = opts.headers || {};
+        if (sessionToken && !headers['Authorization']) {
+          headers['Authorization'] = 'Bearer ' + sessionToken;
+        }
+        const res = await fetch(url, { ...opts, headers });
+        if (res.status === 401) {
+          // auto-clear stale session and prompt re-login
+          localStorage.removeItem('sessionToken');
+          sessionToken = '';
+          setSessionStatus('Session expired. Please sign in again.', 'err');
+          renderSIWNButton();
+          throw new Error('unauthorized');
+        }
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      }
+
+      function setSessionStatus(txt, cls='') {
+        const el = $('session');
+        el.className = 'muted ' + cls;
+        el.textContent = txt;
+      }
+
+      function renderSIWNButton() {
+        if (!neynarClientId) {
+          console.error('SIWN: missing NEYNAR_CLIENT_ID (check /config and your .env)');
+          setSessionStatus('SIWN not configured. Set NEYNAR_CLIENT_ID and restart.', 'err');
+          return;
+        }
+        const container = $('siwn-container');
+        container.innerHTML = '';
+        const div = document.createElement('div');
+        div.className = 'neynar_signin';
+        div.setAttribute('data-client_id', neynarClientId || '');
+        div.setAttribute('data-success-callback', 'onSignInSuccess');
+        div.setAttribute('data-theme', 'dark');
+        container.appendChild(div);
+        // Append SIWN script once
+        if (!document.querySelector('script[src*="neynarxyz.github.io/siwn"]')) {
+          const script = document.createElement('script');
+          script.src = 'https://neynarxyz.github.io/siwn/raw/1.2.0/index.js';
+          script.async = true;
+          document.body.appendChild(script);
+        }
+      }
+
+      async function bootstrap() {
+        try {
+          const cfg = await fetchJSON('/config');
+          neynarClientId = cfg.neynarClientId || '';
+          pinataGateway = cfg.pinataGatewayDomain || '';
+          if (!neynarClientId) {
+            setSessionStatus('NEYNAR_CLIENT_ID missing; set it in .env and add your origin to Authorized Origins in dev portal.', 'err');
+          } else {
+            renderSIWNButton();
+          }
+          if (sessionToken) {
+            const s = await fetchJSON('/auth/session');
+            setSessionStatus(`Logged in: fid ${s.fid} • signer ${s.signerUuid} • approved: ${s.approved}`);
+            // Check wallet connection after session is established
+            checkWalletConnection();
+          } else {
+            setSessionStatus('Not signed in');
+          }
+        } catch (e) {
+          setSessionStatus('Failed to load config', 'err');
+        }
+      }
+
+      // SIWN callback must be global
+      window.onSignInSuccess = async function(data) {
+        try {
+          const fid = data?.fid || data?.user?.fid;
+          const signerUuid = data?.signer_uuid || data?.signerUuid;
+          const r = await fetchJSON('/auth/siwn/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fid, signerUuid }),
+          });
+          sessionToken = r.token;
+          localStorage.setItem('sessionToken', sessionToken);
+          setSessionStatus(`Logged in: fid ${r.fid} • signer ${r.signerUuid} • approved: ${r.approved}`, r.approved ? 'ok' : '');
+          if (!r.approved) pollSigner();
+          
+          // Check wallet connection after successful sign-in
+          checkWalletConnection();
+        } catch (e) {
+          setSessionStatus('Sign-in failed: ' + e.message, 'err');
+        }
+      };
+
+      async function pollSigner() {
+        let tries = 0;
+        const t = setInterval(async () => {
+          tries++;
+          try {
+            const s = await fetchJSON('/signer/status');
+            setSessionStatus(`Signer status: ${s.status} • approved: ${s.approved}`, s.approved ? 'ok' : '');
+            if (s.approved || tries > 60) clearInterval(t);
+          } catch {}
+        }, 2000);
+      }
+
+      $('file').addEventListener('change', async (ev) => {
+        const file = ev.target.files?.[0];
+        if (!file) return;
+        $('uploadStatus').textContent = 'Creating signed upload URL…';
+        try {
+          // First try signed URL flow
+          const r = await fetchJSON('/uploads/pinata/sign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name, network: 'public', expires: 60 }),
+          });
+          const signedUrl = r.url;
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('network', 'public');
+          $('uploadStatus').textContent = 'Uploading to Pinata…';
+          const upRes = await fetch(signedUrl, { method: 'POST', body: fd });
+          const upJson = await upRes.json();
+          const cid = upJson?.data?.cid || upJson?.cid;
+          if (!cid) throw new Error('Upload response missing cid');
+          const base = pinataGateway ? `https://${pinataGateway}` : 'https://ipfs.io';
+          uploadedMediaUrl = `${base}/ipfs/${cid}`;
+          uploadedMediaCid = cid;
+          uploadedMediaKind = file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'other');
+          $('uploadStatus').innerHTML = `Uploaded • CID: <code>${cid}</code>`;
+          // simple preview
+          const prev = $('preview');
+          prev.innerHTML = '';
+          if (file.type.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = uploadedMediaUrl;
+            img.className = 'preview-img';
+            prev.appendChild(img);
+          } else {
+            const a = document.createElement('a');
+            a.href = uploadedMediaUrl; a.target = '_blank'; a.textContent = 'Open uploaded media';
+            prev.appendChild(a);
+          }
+        } catch (e1) {
+          // Fallback: direct proxy upload via backend (no signed URL)
+          try {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('network', 'public');
+            $('uploadStatus').textContent = 'Uploading to Pinata (direct)…';
+            let upRes = await fetch('/uploads/pinata/direct', { method: 'POST', body: fd });
+            let upJson = await upRes.json();
+            if (!upRes.ok) throw new Error(JSON.stringify(upJson));
+            const cid = upJson?.data?.cid || upJson?.cid;
+            if (!cid) throw new Error('Upload response missing cid');
+            const base = pinataGateway ? `https://${pinataGateway}` : 'https://ipfs.io';
+            uploadedMediaUrl = `${base}/ipfs/${cid}`;
+            uploadedMediaCid = cid;
+            uploadedMediaKind = file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'other');
+            $('uploadStatus').innerHTML = `Uploaded • CID: <code>${cid}</code>`;
+            const prev = $('preview');
+            prev.innerHTML = '';
+            if (file.type.startsWith('image/')) {
+              const img = document.createElement('img');
+              img.src = uploadedMediaUrl;
+              img.className = 'preview-img';
+              prev.appendChild(img);
+            } else {
+              const a = document.createElement('a');
+              a.href = uploadedMediaUrl; a.target = '_blank'; a.textContent = 'Open uploaded media';
+              prev.appendChild(a);
+            }
+          } catch (e2) {
+            // Fallback 2: legacy pinFileToIPFS
+            try {
+              const fd2 = new FormData();
+              fd2.append('file', file);
+              $('uploadStatus').textContent = 'Uploading to Pinata (legacy)…';
+              const upRes2 = await fetch('/uploads/pinata/legacy', { method: 'POST', body: fd2 });
+              const upJson2 = await upRes2.json();
+              if (!upRes2.ok) throw new Error(JSON.stringify(upJson2));
+              const cid = upJson2?.IpfsHash || upJson2?.cid || upJson2?.data?.cid;
+              if (!cid) throw new Error('Upload response missing cid');
+              const base = pinataGateway ? `https://${pinataGateway}` : 'https://ipfs.io';
+              uploadedMediaUrl = `${base}/ipfs/${cid}`;
+              uploadedMediaCid = cid;
+              uploadedMediaKind = file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') ? 'video' : 'other');
+              $('uploadStatus').innerHTML = `Uploaded • CID: <code>${cid}</code>`;
+              const prev = $('preview');
+              prev.innerHTML = '';
+              if (file.type.startsWith('image/')) {
+                const img = document.createElement('img');
+                img.src = uploadedMediaUrl;
+                img.className = 'preview-img';
+                prev.appendChild(img);
+              } else {
+                const a = document.createElement('a');
+                a.href = uploadedMediaUrl; a.target = '_blank'; a.textContent = 'Open uploaded media';
+                prev.appendChild(a);
+              }
+            } catch (e3) {
+              $('uploadStatus').textContent = 'Upload failed: ' + (e3?.message || e2?.message || e1?.message || 'Unknown error');
+            }
+          }
+        }
+      });
+
+      // Mode toggle fields
+      function updateModeUI() {
+        const zoraOn = $('modeZora').checked;
+        $('zoraFields').style.display = zoraOn ? '' : 'none';
+      }
+      $('modeCast').addEventListener('change', updateModeUI);
+      $('modeZora').addEventListener('change', updateModeUI);
+      updateModeUI();
+
+      // Check wallet connection when mode changes
+      async function checkWalletConnection() {
+        try {
+          if (!sessionToken) {
+            $('walletInfo').textContent = 'Sign in first to check wallet connection';
+            return;
+          }
+          
+          const walletInfo = await fetchJSON('/auth/wallet');
+          const info = $('walletInfo');
+          
+          if (walletInfo.hasWallet) {
+            info.innerHTML = `✓ Wallet connected: <code>${walletInfo.walletAddress.slice(0,8)}…</code> | ${walletInfo.username || walletInfo.displayName || 'Unknown user'} | Zora: ${walletInfo.zoraConfigured ? '✓' : '✗'}`;
+            info.className = 'ok';
+            // Show immediate create button for Zora mode
+            $('createNowBtn').style.display = $('modeZora').checked ? 'inline-block' : 'none';
+          } else {
+            info.textContent = 'No wallet address found for your Farcaster account';
+            info.className = 'err';
+            $('createNowBtn').style.display = 'none';
+          }
+        } catch (e) {
+          $('walletInfo').textContent = 'Failed to check wallet: ' + (e?.message || 'unknown error');
+          $('walletInfo').className = 'err';
+          $('createNowBtn').style.display = 'none';
+        }
+      }
+
+      // Update mode UI with wallet check
+      function updateModeUI() {
+        const zoraOn = $('modeZora').checked;
+        $('zoraFields').style.display = zoraOn ? '' : 'none';
+        $('createNowBtn').style.display = zoraOn ? 'inline-block' : 'none';
+        if (zoraOn) checkWalletConnection();
+      }
+
+      // Immediate coin creation
+      $('createNowBtn').addEventListener('click', async () => {
+        if (!sessionToken) return $('scheduleMsg').textContent = 'Sign in first';
+        
+        const title = $('zoraTitle').value.trim();
+        const caption = $('zoraCaption').value.trim();
+        const symbol = $('zoraSymbol').value.trim();
+        const overrideAddr = $('overrideAddress').value.trim();
+        
+        if (!title) return $('scheduleMsg').textContent = 'Enter title';
+        if (!caption) return $('scheduleMsg').textContent = 'Enter caption';
+        if (!uploadedMediaUrl) return $('scheduleMsg').textContent = 'Upload media first';
+        
+        try {
+          $('scheduleMsg').textContent = 'Creating coin...';
+          $('createNowBtn').disabled = true;
+          // Build metadata first when possible
+          let metadataCid = '';
+          if (uploadedMediaCid) {
+            const meta = await fetchJSON('/zora/coins/metadata', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title,
+                caption,
+                symbol: symbol || undefined,
+                imageCid: uploadedMediaKind==='image' ? uploadedMediaCid : undefined,
+                videoCid: uploadedMediaKind==='video' ? uploadedMediaCid : undefined,
+              })
+            });
+            metadataCid = meta?.cid || '';
+          }
+
+          const result = await fetchJSON('/zora/coins/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title,
+              caption,
+              symbol: symbol || undefined,
+              mediaUrl: uploadedMediaUrl,
+              walletAddress: overrideAddr || undefined,
+              metadataCid: metadataCid || undefined,
+            }),
+          });
+          
+          $('scheduleMsg').innerHTML = `Coin created! ✓ <a href="https://basescan.org/tx/${result.transactionHash}" target="_blank">View transaction</a>`;
+          $('scheduleMsg').className = 'ok';
+          
+          // Clear form
+          $('zoraTitle').value = '';
+          $('zoraCaption').value = '';
+          $('zoraSymbol').value = '';
+          
+        } catch (e) {
+          $('scheduleMsg').textContent = 'Failed to create coin: ' + (e?.message || 'unknown error');
+          $('scheduleMsg').className = 'err';
+        } finally {
+          $('createNowBtn').disabled = false;
+        }
+      });
+
+      $('scheduleBtn').addEventListener('click', async () => {
+        const whenLocal = $('when').value;
+        if (!whenLocal) return $('scheduleMsg').textContent = 'Pick a date/time';
+        if (!sessionToken) return $('scheduleMsg').textContent = 'Sign in first';
+        const when = new Date(whenLocal).toISOString();
+        const zoraMode = $('modeZora').checked;
+        try {
+          $('scheduleMsg').textContent = 'Scheduling…';
+          if (!zoraMode) {
+            const text = $('text').value.trim();
+            if (!text) return $('scheduleMsg').textContent = 'Enter text';
+            await fetchJSON('/casts/schedule', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text, when, mediaUrl: uploadedMediaUrl || undefined }),
+            });
+            $('scheduleMsg').textContent = 'Scheduled ✓';
+            await loadQueue();
+          } else {
+            const title = $('zoraTitle').value.trim();
+            const symbol = $('zoraSymbol').value.trim();
+            const caption = $('zoraCaption').value.trim();
+            if (!title) return $('scheduleMsg').textContent = 'Enter title';
+            if (!caption) return $('scheduleMsg').textContent = 'Enter caption';
+            // Build metadata if media present
+            let metadataCid = '';
+            if (uploadedMediaCid) {
+              const meta = await fetchJSON('/zora/coins/metadata', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, caption, symbol: symbol || undefined, imageCid: uploadedMediaKind==='image' ? uploadedMediaCid : undefined, videoCid: uploadedMediaKind==='video' ? uploadedMediaCid : undefined })
+              });
+              metadataCid = meta?.cid || '';
+            }
+            await fetchJSON('/zora/coins/schedule', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title, caption, symbol: symbol || undefined, when, mediaUrl: uploadedMediaUrl || undefined, metadataCid: metadataCid || undefined, walletAddress: ($('overrideAddress').value.trim() || undefined) })
+            });
+            $('scheduleMsg').textContent = 'Scheduled ✓';
+            await loadZoraQueue();
+          }
+        } catch (e) {
+          $('scheduleMsg').textContent = 'Failed: ' + e.message;
+        }
+      });
+
+      async function loadQueue() {
+        try {
+          const q = await fetchJSON('/casts/queue');
+          const tb = $('queueBody');
+          tb.innerHTML = '';
+          (q.jobs || []).forEach((j) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${j.status}</td>
+              <td><span class="muted">${j.when}</span></td>
+              <td>${(j.text || '').slice(0, 80)}</td>
+              <td>${j.mediaUrl ? `<a href="${j.mediaUrl}" target="_blank">media</a>` : ''}</td>
+              <td>${j.castHash ? `<code>${j.castHash}</code>` : ''}</td>
+              <td>${j.error ? `<span class="err">${(j.error||'').slice(0,120)}</span>` : ''}</td>
+              <td></td>
+            `;
+            const actions = tr.querySelector('td:last-child');
+            if (j.status === 'pending') {
+              const cancel = document.createElement('button');
+              cancel.textContent = 'Cancel';
+              cancel.className = 'secondary';
+              cancel.onclick = async () => { await fetchJSON(`/casts/${j.id}/cancel`, { method: 'POST' }); await loadQueue(); };
+              actions.appendChild(cancel);
+            }
+            $('queueBody').appendChild(tr);
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      $('refreshBtn').addEventListener('click', loadQueue);
+      $('runNowBtn').addEventListener('click', async () => {
+        try { 
+          await fetchJSON('/tasks/run', { method: 'POST' }); 
+          await fetchJSON('/zora/tasks/run', { method: 'POST' });
+          await loadQueue(); 
+          await loadZoraQueue();
+        } catch (e) { console.error(e); }
+      });
+
+      // View Zora Profile (minimal): name, avatar, recent 3 coins
+      $('viewZoraProfileBtn').addEventListener('click', async () => {
+        try {
+          const sess = await fetchJSON('/auth/session');
+          const fid = sess?.fid;
+          const addrOverride = $('overrideAddress').value.trim();
+          const p = addrOverride
+            ? await fetchJSON(`/zora/profile?address=${encodeURIComponent(addrOverride)}`)
+            : await fetchJSON(fid ? `/zora/profile?fid=${encodeURIComponent(fid)}` : '/zora/profile');
+          const box = $('zoraProfileBox');
+          const coins = (p.coins || []).map((c) => `<li><code>${c.symbol || ''}</code> ${c.name || ''} <small class="muted">${(c.address||'').slice(0,8)}…</small></li>`).join('');
+          box.innerHTML = `
+            <div style="display:flex; align-items:center; gap:10px;">
+              ${p.avatar ? `<img src="${p.avatar}" alt="avatar" style="width:36px;height:36px;border-radius:50%">` : ''}
+              <strong>${p.name || p.address}</strong>
+              <span class="muted">${p.address.slice(0,8)}…</span>
+            </div>
+            <div style="margin-top:6px;">
+              <div style="font-weight:600;">Recent coins</div>
+              <ul style="margin:6px 0 0 16px;">${coins || '<li class="muted">None</li>'}</ul>
+            </div>
+          `;
+        } catch (e) {
+          $('zoraProfileBox').textContent = 'Failed to load profile: ' + (e?.message || 'unknown error');
+        }
+      });
+
+      async function loadZoraQueue() {
+        try {
+          const q = await fetchJSON('/zora/coins/queue');
+          const tb = $('zoraQueueBody');
+          tb.innerHTML = '';
+          (q.jobs || []).forEach((j) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${j.status}</td>
+              <td><span class="muted">${j.when}</span></td>
+              <td>${(j.title || j?.zora?.title || '').slice(0, 80)}</td>
+              <td>${(j.symbol || j?.zora?.symbol || '')}</td>
+              <td>${(j.mediaUrl || (j?.zora?.imageCid ? 'ipfs://'+j.zora.imageCid : '')) ? '<a href="#" class="muted">media</a>' : ''}</td>
+              <td>${j.txHash ? `<code>${j.txHash.slice(0,10)}…</code>` : ''}</td>
+              <td>${j.error ? `<span class="err">${(j.error||'').slice(0,120)}</span>` : ''}</td>
+              <td></td>
+            `;
+            const actions = tr.querySelector('td:last-child');
+            if (j.status === 'pending') {
+              const cancel = document.createElement('button');
+              cancel.textContent = 'Cancel';
+              cancel.className = 'secondary';
+              cancel.onclick = async () => { await fetchJSON(`/zora/coins/${j.id}/cancel`, { method: 'POST' }); await loadZoraQueue(); };
+              actions.appendChild(cancel);
+            }
+            tb.appendChild(tr);
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      // Removed old zoraScheduleBtn handler; unified Schedule button handles both modes
+
+      $('zoraRefreshBtn').addEventListener('click', loadZoraQueue);
+      $('zoraRunNowBtn').addEventListener('click', async () => {
+        try { await fetchJSON('/zora/tasks/run', { method: 'POST' }); await loadZoraQueue(); } catch (e) { console.error(e); }
+      });
+
+      bootstrap().then(() => { loadQueue(); loadZoraQueue(); });
+    </script>
+  </body>
+  </html>

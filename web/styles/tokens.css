@@ -1,0 +1,86 @@
+:root {
+  color-scheme: light;
+  --dynamic-type-scale: 1;
+  --font-sans: "Inter", "system-ui", sans-serif;
+
+  --background: 255 255 255;
+  --foreground: 17 24 39;
+  --card: 248 250 252;
+  --card-foreground: 17 24 39;
+  --popover: 255 255 255;
+  --popover-foreground: 17 24 39;
+
+  --primary: 37 99 235;
+  --primary-foreground: 255 255 255;
+  --secondary: 147 51 234;
+  --secondary-foreground: 255 255 255;
+  --accent: 249 115 22;
+  --accent-foreground: 23 23 23;
+  --success: 34 197 94;
+  --success-foreground: 255 255 255;
+  --warning: 245 158 11;
+  --warning-foreground: 17 24 39;
+  --destructive: 220 38 38;
+  --destructive-foreground: 255 255 255;
+  --muted: 243 244 246;
+  --muted-foreground: 107 114 128;
+
+  --border: 221 229 239;
+  --input: 221 229 239;
+  --ring: 37 99 235;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.08);
+  --shadow-md: 0 4px 12px rgb(15 23 42 / 0.12);
+  --shadow-lg: 0 20px 45px rgb(37 99 235 / 0.35);
+}
+
+.dark {
+  color-scheme: dark;
+  --dynamic-type-scale: 1;
+  --font-sans: "Inter", "system-ui", sans-serif;
+
+  --background: 15 23 42;
+  --foreground: 226 232 240;
+  --card: 22 30 48;
+  --card-foreground: 241 245 249;
+  --popover: 22 30 48;
+  --popover-foreground: 241 245 249;
+
+  --primary: 125 172 255;
+  --primary-foreground: 15 23 42;
+  --secondary: 196 135 255;
+  --secondary-foreground: 23 23 23;
+  --accent: 255 171 94;
+  --accent-foreground: 23 23 23;
+  --success: 74 222 128;
+  --success-foreground: 15 23 42;
+  --warning: 252 211 77;
+  --warning-foreground: 23 23 23;
+  --destructive: 248 113 113;
+  --destructive-foreground: 15 23 42;
+  --muted: 38 50 72;
+  --muted-foreground: 186 194 208;
+
+  --border: 63 78 102;
+  --input: 78 93 120;
+  --ring: 148 187 255;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgb(8 13 23 / 0.45);
+  --shadow-md: 0 10px 30px rgb(8 13 23 / 0.55);
+  --shadow-lg: 0 24px 54px rgb(59 130 246 / 0.45);
+}
+
+html[data-dynamic-type='large'],
+html[data-dynamic-type='xl'] {
+  --dynamic-type-scale: 1.3;
+}

@@ -1,0 +1,40 @@
+{
+  "name": "neynar-farcaster-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:zora": "node scripts/test-zora-integration.js",
+    "archon:add-doc": "node scripts/archon/add-doc.mjs --file doc-neynerlll.md",
+    "bmad:refresh": "bmad-method install -f -i codex",
+    "bmad:list": "bmad-method list:agents",
+    "bmad:validate": "bmad-method validate"
+  },
+  "dependencies": {
+    "@neynar/nodejs-sdk": "latest",
+    "@zoralabs/coins-sdk": "^0.3.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "viem": "^2.9.6",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.11",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "shadcn": "^3.2.1",
+    "tailwindcss": "^4.1.13",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.5.4"
+  }
+}

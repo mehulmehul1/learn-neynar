@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zora Coins Scheduler (Demo)</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; line-height: 1.4; }
+      h1 { margin: 0 0 12px; }
+      section { border: 1px solid #e9ecef33; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+      label { display: block; margin: 8px 0 4px; }
+      input[type="text"], textarea, input[type="datetime-local"] { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #dee2e6; background: inherit; color: inherit; }
+      button { padding: 8px 12px; border-radius: 6px; border: 1px solid #adb5bd; background: #0a58ca; color: #fff; cursor: pointer; }
+      button.secondary { background: transparent; color: inherit; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .muted { color: #6c757d; font-size: 0.9rem; }
+      .ok { color: #198754; }
+      .err { color: #dc3545; }
+      .preview { margin-top: 8px; }
+      img.preview-img { max-width: 240px; border-radius: 6px; border: 1px solid #e9ecef55; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 8px; border-bottom: 1px solid #e9ecef33; text-align: left; }
+      code { background: #e9ecef22; padding: 2px 4px; border-radius: 4px; }
+      a { color: #0a58ca; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Zora Coins Scheduler (Demo)</h1>
+
+    <p class="muted">This page schedules creation of a Zora Coin with title, caption, and image/video. It uses your Farcaster session to infer FID; wallet mapping to signer is handled on the server.</p>
+
+    <section>
+      <h3>1) Session</h3>
+      <div id="session" class="muted"></div>
+      <p><a href="/app.html">Open SIWN page</a> to create a session if not signed in yet.</p>
+    </section>
+
+    <section>
+      <h3>2) Define Coin</h3>
+      <label>Title (name)</label>
+      <input id="title" type="text" placeholder="e.g., Kamo Coin" />
+      <label>Caption (description)</label>
+      <textarea id="caption" rows="3" placeholder="Describe your coin…"></textarea>
+      <div class="row">
+        <div style="flex:1">
+          <label>Symbol (optional)</label>
+          <input id="symbol" type="text" placeholder="e.g., KAMO" />
+        </div>
+        <div>
+          <label>Media (image/video)</label>
+          <input id="file" type="file" accept="image/*,video/mp4" />
+          <div id="uploadStatus" class="muted"></div>
+          <div id="preview" class="preview"></div>
+        </div>
+        <div>
+          <label>Schedule (local time)</label>
+          <input id="when" type="datetime-local" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="scheduleBtn">Schedule Coin Creation</button>
+        <span id="scheduleMsg" class="muted"></span>
+      </div>
+    </section>
+
+    <section>
+      <div class="row" style="justify-content: space-between;">
+        <h3>3) Zora Queue</h3>
+        <div class="row">
+          <button id="runNowBtn" class="secondary">Run Due Now</button>
+          <button id="refreshBtn" class="secondary">Refresh</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>When (UTC)</th>
+            <th>Title</th>
+            <th>Symbol</th>
+            <th>Media</th>
+            <th>Coin</th>
+            <th>Tx</th>
+            <th>Error</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="queueBody"></tbody>
+      </table>
+    </section>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let sessionToken = localStorage.getItem('sessionToken') || '';
+      let pinataGateway = '';
+      let uploadedMediaUrl = '';
+      let uploadedMime = '';
+
+      async function fetchJSON(url, opts={}) {
+        const headers = opts.headers || {};
+        if (sessionToken && !headers['Authorization']) headers['Authorization'] = 'Bearer ' + sessionToken;
+        const res = await fetch(url, { ...opts, headers });
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      }
+
+      async function bootstrap() {
+        try {
+          // reuse config endpoint for Pinata gateway value
+          const cfg = await fetchJSON('/config');
+          pinataGateway = cfg.pinataGatewayDomain || '';
+          // try session view
+          if (sessionToken) {
+            try {
+              const s = await fetchJSON('/auth/session');
+              $('session').textContent = `Logged in: fid ${s.fid} • signer ${s.signerUuid} • approved: ${s.approved}`;
+            } catch { $('session').textContent = 'Not signed in'; }
+          } else {
+            $('session').textContent = 'Not signed in';
+          }
+        } catch {
+          $('session').textContent = 'Config/session unavailable';
+        }
+      }
+
+      $('file').addEventListener('change', async (ev) => {
+        const file = ev.target.files?.[0];
+        if (!file) return;
+        uploadedMime = file.type || '';
+        $('uploadStatus').textContent = 'Creating signed upload URL…';
+        try {
+          const r = await fetchJSON('/uploads/pinata/sign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name, network: 'public', expires: 60 }),
+          });
+          const signedUrl = r.url;
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('network', 'public');
+          $('uploadStatus').textContent = 'Uploading to Pinata…';
+          const upRes = await fetch(signedUrl, { method: 'POST', body: fd });
+          const upJson = await upRes.json();
+          const cid = upJson?.data?.cid || upJson?.cid;
+          if (!cid) throw new Error('Upload response missing cid');
+          const base = pinataGateway ? `https://${pinataGateway}` : 'https://ipfs.io';
+          uploadedMediaUrl = `${base}/ipfs/${cid}`;
+          $('uploadStatus').innerHTML = `Uploaded • CID: <code>${cid}</code>`;
+          const prev = $('preview');
+          prev.innerHTML = '';
+          if (file.type.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = uploadedMediaUrl; img.className = 'preview-img'; prev.appendChild(img);
+          } else {
+            const a = document.createElement('a'); a.href = uploadedMediaUrl; a.target = '_blank'; a.textContent = 'Open media'; prev.appendChild(a);
+          }
+        } catch (e) {
+          $('uploadStatus').textContent = 'Upload failed: ' + (e?.message || 'Unknown error');
+        }
+      });
+
+      $('scheduleBtn').addEventListener('click', async () => {
+        const title = $('title').value.trim();
+        const caption = $('caption').value.trim();
+        const symbol = $('symbol').value.trim();
+        const whenLocal = $('when').value;
+        if (!title) return $('scheduleMsg').textContent = 'Enter title';
+        if (!whenLocal) return $('scheduleMsg').textContent = 'Pick a date/time';
+        if (!sessionToken) return $('scheduleMsg').textContent = 'Sign in first (use SIWN page)';
+        const when = new Date(whenLocal).toISOString();
+        try {
+          $('scheduleMsg').textContent = 'Scheduling…';
+          const r = await fetchJSON('/zora/coins/schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, caption: caption || undefined, symbol: symbol || undefined, mediaUrl: uploadedMediaUrl || undefined, mediaMime: uploadedMime || undefined, when }),
+          });
+          $('scheduleMsg').textContent = 'Scheduled ✓';
+          await loadQueue();
+        } catch (e) {
+          $('scheduleMsg').textContent = 'Failed: ' + e.message;
+        }
+      });
+
+      async function loadQueue() {
+        try {
+          const q = await fetchJSON('/zora/coins/queue');
+          const tb = $('queueBody'); tb.innerHTML = '';
+          (q.jobs || []).forEach((j) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${j.status}</td>
+              <td><span class="muted">${j.when}</span></td>
+              <td>${(j.title || '').slice(0, 60)}</td>
+              <td>${j.symbol || ''}</td>
+              <td>${j.mediaUrl ? `<a href="${j.mediaUrl}" target="_blank">media</a>` : ''}</td>
+              <td>${j.coinAddress ? `<code>${j.coinAddress}</code>` : ''}</td>
+              <td>${j.txHash ? `<code>${j.txHash.slice(0,10)}…</code>` : ''}</td>
+              <td>${j.error ? `<span class="err">${(j.error||'').slice(0,120)}</span>` : ''}</td>
+              <td></td>
+            `;
+            const actions = tr.querySelector('td:last-child');
+            if (j.status === 'pending') {
+              const cancel = document.createElement('button');
+              cancel.textContent = 'Cancel';
+              cancel.className = 'secondary';
+              cancel.onclick = async () => { await fetchJSON(`/zora/coins/${j.id}/cancel`, { method: 'POST' }); await loadQueue(); };
+              actions.appendChild(cancel);
+            }
+            $('queueBody').appendChild(tr);
+          });
+        } catch (e) { console.error(e); }
+      }
+
+      $('refreshBtn').addEventListener('click', loadQueue);
+      $('runNowBtn').addEventListener('click', async () => {
+        try { await fetchJSON('/zora/tasks/run', { method: 'POST' }); await loadQueue(); } catch (e) { console.error(e); }
+      });
+
+      bootstrap().then(loadQueue);
+    </script>
+  </body>
+  </html>
+
